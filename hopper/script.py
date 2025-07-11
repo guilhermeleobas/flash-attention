@@ -8,7 +8,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 torch._dynamo.config.capture_scalar_outputs = True
-torch._dynamo.config.recompile_limit = 32
+torch._dynamo.config.recompile_limit = 2
 
 def test_flash_attention_3():
     """Test Flash Attention 3 with Microsoft Phi-1 model"""
@@ -24,7 +24,7 @@ def test_flash_attention_3():
         trust_remote_code=True
     )
 
-    model.forward = torch.compile(model.forward, backend="aot_eager", fullgraph=False, dynamic=False)
+    model.forward = torch.compile(model.forward, backend="aot_eager", fullgraph=False)
     
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
