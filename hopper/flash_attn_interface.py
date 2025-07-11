@@ -1,6 +1,6 @@
 # Copyright (c) 2023, Tri Dao.
 
-from typing import Optional, Union
+from typing import Optional, Union, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -17,40 +17,66 @@ def maybe_contiguous(x):
     return x.contiguous() if x is not None and x.stride(-1) != 1 else x
 
 
+# torch.compile() support is only enabled for pytorch >= 2.4
+# The reason for this is that we are using the new custom_op and register_fake
+# APIs, which support inplace modification of inputs in the function itself
+if torch.__version__ >= "2.4.0":
+    _torch_custom_op_wrapper = torch.library.custom_op
+    _torch_register_fake_wrapper = torch.library.register_fake
+else:
+    def noop_custom_op_wrapper(name, fn=None, /, *, mutates_args, device_types=None, schema=None):
+        def wrap(func):
+            return func
+        if fn is None:
+            return wrap
+        return fn
+    def noop_register_fake_wrapper(op, fn=None, /, *, lib=None, _stacklevel=1):
+        def wrap(func):
+            return func
+        if fn is None:
+            return wrap
+        return fn
+    _torch_custom_op_wrapper = noop_custom_op_wrapper
+    _torch_register_fake_wrapper = noop_register_fake_wrapper
+
+
+@_torch_custom_op_wrapper("flash_attn::_flash_attn_forward", mutates_args=(), device_types="cuda")
 def _flash_attn_forward(
-        q,
-        k,
-        v,
-        k_new,
-        v_new,
-        qv,
-        out,
-        cu_seqlens_q,
-        cu_seqlens_k,
-        cu_seqlens_k_new,
-        seqused_q,
-        seqused_k,
-        max_seqlen_q,
-        max_seqlen_k,
-        page_table,
-        kv_batch_idx,
-        leftpad_k,
-        rotary_cos,
-        rotary_sin,
-        seqlens_rotary,
-        q_descale,
-        k_descale,
-        v_descale,
-        softmax_scale,
-        causal,
-        window_size=(-1, -1),
-        attention_chunk=0,
-        softcap=0.0,
-        rotary_interleaved=True,
-        scheduler_metadata=None,
-        num_splits=1,
-        pack_gqa=None,
-        sm_margin=0):
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    k_new: Optional[torch.Tensor],
+    v_new: Optional[torch.Tensor],
+    qv: Optional[torch.Tensor],
+    out: Optional[torch.Tensor],
+    cu_seqlens_q: Optional[torch.Tensor],
+    cu_seqlens_k: Optional[torch.Tensor],
+    cu_seqlens_k_new: Optional[torch.Tensor],
+    seqused_q: Optional[torch.Tensor],
+    seqused_k: Optional[torch.Tensor],
+    max_seqlen_q: Optional[int],
+    max_seqlen_k: Optional[int],
+    page_table: Optional[torch.Tensor],
+    kv_batch_idx: Optional[torch.Tensor],
+    leftpad_k: Optional[torch.Tensor],
+    rotary_cos: Optional[torch.Tensor],
+    rotary_sin: Optional[torch.Tensor],
+    seqlens_rotary: Optional[torch.Tensor],
+    q_descale: Optional[torch.Tensor],
+    k_descale: Optional[torch.Tensor],
+    v_descale: Optional[torch.Tensor],
+    softmax_scale: Optional[float],
+    causal: bool,
+    window_size_left: int = -1,
+    window_size_right: int = -1,
+    attention_chunk: int = 0,
+    softcap: float = 0.0,
+    rotary_interleaved: bool = True,
+    scheduler_metadata: Optional[torch.Tensor] = None,
+    num_splits: int = 1,
+    pack_gqa: Optional[bool] = None,
+    sm_margin: int = 0,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     q, k, k_new, v_new = [maybe_contiguous(x) for x in (q, k, k_new, v_new)]
     v = v.contiguous() if v.stride(-1) != 1 and v.stride(-3) != 1 else v
     cu_seqlens_q, cu_seqlens_k, cu_seqlens_k_new = [
@@ -88,8 +114,8 @@ def _flash_attn_forward(
         v_descale,
         softmax_scale,
         causal,
-        window_size[0],
-        window_size[1],
+        window_size_left,
+        window_size_right,
         attention_chunk,
         softcap,
         rotary_interleaved,
@@ -99,6 +125,127 @@ def _flash_attn_forward(
         sm_margin,
     )
     return out, softmax_lse, *rest
+
+
+@_torch_register_fake_wrapper("flash_attn::_flash_attn_forward")
+def _flash_attn_forward_fake(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    k_new: Optional[torch.Tensor],
+    v_new: Optional[torch.Tensor],
+    qv: Optional[torch.Tensor],
+    out: Optional[torch.Tensor],
+    cu_seqlens_q: Optional[torch.Tensor],
+    cu_seqlens_k: Optional[torch.Tensor],
+    cu_seqlens_k_new: Optional[torch.Tensor],
+    seqused_q: Optional[torch.Tensor],
+    seqused_k: Optional[torch.Tensor],
+    max_seqlen_q: Optional[int],
+    max_seqlen_k: Optional[int],
+    page_table: Optional[torch.Tensor],
+    kv_batch_idx: Optional[torch.Tensor],
+    leftpad_k: Optional[torch.Tensor],
+    rotary_cos: Optional[torch.Tensor],
+    rotary_sin: Optional[torch.Tensor],
+    seqlens_rotary: Optional[torch.Tensor],
+    q_descale: Optional[torch.Tensor],
+    k_descale: Optional[torch.Tensor],
+    v_descale: Optional[torch.Tensor],
+    softmax_scale: Optional[float],
+    causal: bool,
+    window_size_left: int = -1,
+    window_size_right: int = -1,
+    attention_chunk: int = 0,
+    softcap: float = 0.0,
+    rotary_interleaved: bool = True,
+    scheduler_metadata: Optional[torch.Tensor] = None,
+    num_splits: int = 1,
+    pack_gqa: Optional[bool] = None,
+    sm_margin: int = 0,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    # q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
+    # batch_size, seqlen_q, num_heads, head_size = q.shape
+    # seqlen_k = k.shape[1]
+    # out = torch.empty_like(q)
+    # softmax_lse = torch.empty((batch_size, num_heads, seqlen_q), dtype=torch.float32, device=q.device, layout=q.layout)
+    # p = torch.empty((0,), dtype=q.dtype, device=q.device, layout=q.layout)
+    # if return_softmax:
+    #     p = torch.empty((batch_size, num_heads, round_multiple(seqlen_q, 128), round_multiple(seqlen_k, 128)), dtype=q.dtype, device=q.device, layout=q.layout)
+    # rng_state = torch.empty((2,), dtype=torch.int64, device=q.device)
+
+    # return out, softmax_lse, p, rng_state
+
+    # q, k, k_new, v_new = [maybe_contiguous(x) for x in (q, k, k_new, v_new)]
+    # batch_size, seqlen_q, num_heads, head_size = q.shape
+    # seqlen_k = k.shape[1]
+    # out = torch.empty_like(q)
+    # softmax_lse = torch.empty((batch_size, num_heads, seqlen_q), dtype=q.dtype, device=q.device, layout=q.layout)
+    # p = torch.empty((0,), dtype=q.dtype, device=q.device, layout=q.layout)
+    # if return_softmax:
+    #     p = torch.empty((batch_size, num_heads, round_multiple(seqlen_q, 128), round_multiple(seqlen_k, 128)), dtype=q.dtype, device=q.device, layout=q.layout)
+    # rng_state = torch.empty((2,), dtype=torch.int64, device=q.device)
+
+    # return out, softmax_lse, p, rng_state
+
+    """
+    Symbolic fake implementation of flash attention forward.
+    Returns tensors with the correct shapes and dtypes without actual computation.
+    """
+    
+    # Determine if we're in varlen mode
+    is_varlen_q = cu_seqlens_q is not None
+    is_varlen_k = cu_seqlens_k is not None
+    
+    # Get dimensions from query tensor
+    if is_varlen_q:
+        # varlen mode: q is (total_q, num_heads, head_size)
+        total_q, num_heads, head_size = q.shape
+        batch_size = cu_seqlens_q.shape[0] - 1
+        seqlen_q = max_seqlen_q if max_seqlen_q is not None else 0
+    else:
+        # batch mode: q is (batch_size, seqlen_q, num_heads, head_size)
+        batch_size, seqlen_q, num_heads, head_size = q.shape
+        total_q = batch_size * seqlen_q
+    
+    # Get value head dimension
+    head_size_v = v.shape[-1]
+    
+    # Determine output dtype (FP8 inputs produce BF16 outputs)
+    q_type = q.dtype
+    if q_type == torch.float8_e4m3fn:
+        out_dtype = torch.bfloat16
+    else:
+        out_dtype = q_type
+    
+    # Create output tensor
+    if out is None:
+        if is_varlen_q:
+            out = torch.empty((total_q, num_heads, head_size_v), dtype=out_dtype, device=q.device)
+        else:
+            out = torch.empty((batch_size, seqlen_q, num_heads, head_size_v), dtype=out_dtype, device=q.device)
+    
+    # Create softmax_lse tensor
+    if is_varlen_q:
+        softmax_lse = torch.empty((num_heads, total_q), dtype=torch.float32, device=q.device)
+    else:
+        softmax_lse = torch.empty((batch_size, num_heads, seqlen_q), dtype=torch.float32, device=q.device)
+    
+    # Create accumulator tensors (used when num_splits > 1)
+    if num_splits > 1:
+        if is_varlen_q:
+            out_accum = torch.empty((num_splits, num_heads, total_q, head_size_v), dtype=torch.float32, device=q.device)
+            softmax_lse_accum = torch.empty((num_splits, num_heads, total_q), dtype=torch.float32, device=q.device)
+        else:
+            out_accum = torch.empty((num_splits, batch_size, num_heads, seqlen_q, head_size_v), dtype=torch.float32, device=q.device)
+            softmax_lse_accum = torch.empty((num_splits, batch_size, num_heads, seqlen_q), dtype=torch.float32, device=q.device)
+    else:
+        # Empty tensors when num_splits == 1
+        out_accum = torch.empty(0, dtype=torch.float32, device=q.device)
+        softmax_lse_accum = torch.empty(0, dtype=torch.float32, device=q.device)
+    
+    return out, softmax_lse, out_accum, softmax_lse_accum
+
 
 
 def _flash_attn_backward(
@@ -194,7 +341,9 @@ class FlashAttnQKVPackedFunc(torch.autograd.Function):
             q_descale, k_descale, v_descale,
             softmax_scale,
             causal=causal,
-            window_size=window_size,
+            # window_size=window_size,
+            window_size_left=window_size[0],
+            window_size_right=window_size[1],
             attention_chunk=attention_chunk,
             softcap=softcap,
             sm_margin=sm_margin,
@@ -288,7 +437,8 @@ class FlashAttnFunc(torch.autograd.Function):
             q_descale, k_descale, v_descale,
             softmax_scale,
             causal=causal,
-            window_size=window_size,
+            window_size_left=window_size[0],
+            window_size_right=window_size[1],
             attention_chunk=attention_chunk,
             softcap=softcap,
             num_splits=num_splits,
@@ -385,7 +535,8 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             q_descale, k_descale, v_descale,
             softmax_scale,
             causal=causal,
-            window_size=window_size,
+            window_size_left=window_size[0],
+            window_size_right=window_size[1],
             attention_chunk=attention_chunk,
             softcap=softcap,
             num_splits=num_splits,
@@ -778,7 +929,8 @@ def flash_attn_with_kvcache(
         q_descale, k_descale, v_descale,
         softmax_scale,
         causal=causal,
-        window_size=window_size,
+        window_size_left=window_size[0],
+        window_size_right=window_size[1],
         attention_chunk=attention_chunk,
         softcap=softcap,
         rotary_interleaved=rotary_interleaved,
