@@ -21,10 +21,11 @@ def test_flash_attention_3():
         attn_implementation="flash_attention_3",
         torch_dtype=torch.float16,
         device_map="auto",
-        trust_remote_code=True
+        trust_remote_code=True,
     )
 
-    model.forward = torch.compile(model.forward, backend="aot_eager", fullgraph=False)
+    # model.forward = torch.compile(model.forward, backend="aot_eager", fullgraph=False)
+    model = torch.compile(model)
     
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
@@ -42,7 +43,8 @@ def test_flash_attention_3():
             max_new_tokens=50,
             do_sample=True,
             temperature=0.7,
-            pad_token_id=tokenizer.eos_token_id
+            pad_token_id=tokenizer.eos_token_id,
+            cache_implementation="static",
         )
     
     # Decode output

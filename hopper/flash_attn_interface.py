@@ -22,7 +22,7 @@ def round_multiple(x, m):
 
 
 def round_up_headdim(head_size: int) -> int:
-    from flash_attn.__config__ import CONFIG
+    from flash_attn_config import CONFIG
 
     if CONFIG["build_flags"]["FLASHATTENTION_DISABLE_HDIM64"]:
         if head_size <= 64:
