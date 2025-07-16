@@ -22,18 +22,23 @@ def round_multiple(x, m):
 
 
 def round_up_headdim(head_size: int) -> int:
-    # flash-attention needs to expose which flags it was build with
-    # TODO(guilhermeleobas): figure it out how to do this!
-    if head_size <= 64:
-        return 64
-    if head_size <= 96:
-        return 96
-    if head_size <= 128:
-        return 128
-    if head_size <= 192:
-        return 192
-    if head_size <= 256:
-        return 256
+    from flash_attn.__config__ import CONFIG
+
+    if CONFIG["build_flags"]["FLASHATTENTION_DISABLE_HDIM64"]:
+        if head_size <= 64:
+            return 64
+    if CONFIG["build_flags"]["FLASHATTENTION_DISABLE_HDIM96"]:
+        if head_size <= 96:
+            return 96
+    if CONFIG["build_flags"]["FLASHATTENTION_DISABLE_HDIM128"]:
+        if head_size <= 128:
+            return 128
+    if CONFIG["build_flags"]["FLASHATTENTION_DISABLE_HDIM192"]:
+        if head_size <= 192:
+            return 192
+    if CONFIG["build_flags"]["FLASHATTENTION_DISABLE_HDIM256"]:
+        if head_size <= 256:
+            return 256
     return 256
 
 # torch.compile() support is only enabled for pytorch >= 2.4
@@ -190,8 +195,7 @@ def _flash_attn_forward_fake(
 
     # Determine if we're in varlen mode
     is_varlen_q = cu_seqlens_q is not None
-    is_varlen_k = cu_seqlens_k is not None
-    
+
     # Get dimensions from query tensor
     if is_varlen_q:
         # varlen mode: q is (total_q, num_heads, head_size)
@@ -207,27 +211,27 @@ def _flash_attn_forward_fake(
         total_q = batch_size * q.shape[1]
     # Get value head dimension
     head_size_v = v.shape[-1]
-    
+
     # Determine output dtype (FP8 inputs produce BF16 outputs)
     q_type = q.dtype
     if q_type == torch.float8_e4m3fn:
         out_dtype = torch.bfloat16
     else:
         out_dtype = q_type
-    
+
     # Create output tensor
     if out is None:
         if is_varlen_q:
             out = torch.empty((total_q, num_heads, head_size_v), dtype=out_dtype, device=q.device)
         else:
             out = torch.empty((batch_size, seqlen_q, num_heads, head_size_v), dtype=out_dtype, device=q.device)
-    
+
     # Create softmax_lse tensor
     if is_varlen_q:
         softmax_lse = torch.empty((num_heads, total_q), dtype=torch.float32, device=q.device)
     else:
         softmax_lse = torch.empty((batch_size, num_heads, seqlen_q), dtype=torch.float32, device=q.device)
-    
+
     # TODO(guilhermeleobas): Implement "get_num_splits"
     # There's an heuristic to compute num_splits when "num_splits <= 0"
     # assert that num_splits is > 0 for now
@@ -245,7 +249,7 @@ def _flash_attn_forward_fake(
         # Empty tensors when num_splits < 1
         out_accum = torch.empty(0, dtype=torch.float32, device=q.device)
         softmax_lse_accum = torch.empty(0, dtype=torch.float32, device=q.device)
-    
+
     return out, softmax_lse, out_accum, softmax_lse_accum
 
 
@@ -365,9 +369,6 @@ def _flash_attn_backward(
 
     is_local = (window_size_left >= 0 or window_size_right >= 0) and not is_causal
 
-    if arch < 90:
-        raise ValueError(f"Only cuda compute capabilities 9.0 or newer are supported. Got {arch=}")
-
     if head_size_rounded <= 64:
         kBlockM_sm90 = 96 if (is_causal and softcap > 0.0) else 128
     elif head_size_rounded <= 96:
@@ -377,7 +378,15 @@ def _flash_attn_backward(
     else:
         kBlockM_sm90 = 64
 
-    kBlockM = kBlockM_sm90
+    kBlockM_sm80 = 128 if head_size_rounded <= 64 else 64
+    kBlockM_sm86 = 64 if head_size_rounded <= 192 else 32
+
+    if arch >= 90:
+        kBlockM = kBlockM_sm90
+    elif arch in (86, 89):
+        kBlockM = kBlockM_sm86
+    else:
+        kBlockM = kBlockM_sm80
 
     num_heads = q.shape[-2]
     seqlen_q_rounded = round_multiple(seqlen_q, kBlockM)
@@ -437,7 +446,6 @@ class FlashAttnQKVPackedFunc(torch.autograd.Function):
             q_descale, k_descale, v_descale,
             softmax_scale,
             causal=causal,
-            # window_size=window_size,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
             attention_chunk=attention_chunk,
