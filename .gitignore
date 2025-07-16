@@ -1,5 +1,6 @@
 *.ncu-rep
 .DS_store
+flash_attn_config.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
