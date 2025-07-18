@@ -8,17 +8,18 @@ set -e
 # Run in subshell - variables are automatically cleaned up when it exits
 (
     # Set minimal build flags for PHI-1 reproducer
-    export FLASH_ATTENTION_DISABLE_BACKWARD=TRUE
-    export FLASH_ATTENTION_DISABLE_SPLIT=TRUE
+    export PYTHONBREAKPOINT="pdbp.set_trace"
+    export FLASH_ATTENTION_DISABLE_BACKWARD=FALSE
+    export FLASH_ATTENTION_DISABLE_SPLIT=FALSE
     export FLASH_ATTENTION_DISABLE_SOFTCAP=TRUE
-    export FLASH_ATTENTION_DISABLE_LOCAL=TRUE
+    export FLASH_ATTENTION_DISABLE_LOCAL=FALSE
     export FLASH_ATTENTION_DISABLE_CLUSTER=TRUE
     export FLASH_ATTENTION_DISABLE_VARLEN=FALSE
-    export FLASH_ATTENTION_DISABLE_PACKGQA=TRUE
+    export FLASH_ATTENTION_DISABLE_PACKGQA=FALSE
     export FLASH_ATTENTION_DISABLE_PAGEDKV=TRUE
-    export FLASH_ATTENTION_DISABLE_APPENDKV=TRUE
-    export FLASH_ATTENTION_DISABLE_FP8=TRUE
-    export FLASH_ATTENTION_DISABLE_FP16=FALSE
+    export FLASH_ATTENTION_DISABLE_APPENDKV=FALSE
+    export FLASH_ATTENTION_DISABLE_FP8=FALSE
+    export FLASH_ATTENTION_DISABLE_FP16=TRUE
     export FLASH_ATTENTION_DISABLE_FP32=TRUE
 
     # Keep only 64-dim heads for PHI-1
@@ -30,5 +31,8 @@ set -e
     echo "Environment variables set for minimal build..."
     
     # Install flash-attention
-    python setup.py install
+    # python setup.py install
+    # python -m pytest test_flash_attn_torch_compile.py --tb=line -x -rs -sv
+    python -m pytest test_flash_attn.py --tb=line
+
 )

@@ -11,7 +11,7 @@ model = AutoModelForCausalLM.from_pretrained(
     torch_dtype=torch.float16,
     device_map="auto",    
 )
-model = torch.compile(model, backend="eager")
+model = torch.compile(model, backend="aot_eager", fullgraph=True)
 
 # Add padding token if not present
 if tokenizer.pad_token is None:

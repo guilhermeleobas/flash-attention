@@ -246,9 +246,9 @@ def _flash_attn_forward_fake(
             out_accum = torch.empty((num_splits, batch_size, num_heads, seqlen_q, head_size_v), dtype=torch.float32, device=q.device)
             softmax_lse_accum = torch.empty((num_splits, batch_size, num_heads, seqlen_q), dtype=torch.float32, device=q.device)
     else:
-        # Empty tensors when num_splits < 1
-        out_accum = torch.empty(0, dtype=torch.float32, device=q.device)
-        softmax_lse_accum = torch.empty(0, dtype=torch.float32, device=q.device)
+        # Tensors are not set when num_splits < 1
+        out_accum = None
+        softmax_lse_accum = None
 
     return out, softmax_lse, out_accum, softmax_lse_accum
 
@@ -308,7 +308,7 @@ def _flash_attn_backward(
 
 
 @_torch_register_fake_wrapper("flash_attn::_flash_attn_backward")
-def _flash_attn_backward(
+def _flash_attn_backward_fake(
         dout: torch.Tensor,
         q: torch.Tensor,
         k: torch.Tensor,
